@@ -114,7 +114,6 @@ for ev in ALL_EVS:
         control_image=depth_mask,
         controlnet_conditioning_scale=0.5,
         callback_on_step_end=callback,
-        callback_on_step_end_tensor_inputs=['latents','mask'],
         generator=generator
     )
     is_exposure_lora_loaded = False
