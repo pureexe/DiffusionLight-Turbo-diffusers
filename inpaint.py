@@ -93,7 +93,8 @@ for ev in ALL_EVS:
     is_exposure_lora_loaded = False
     def callback(pipeline, i, t, callback_kwargs):
         global is_exposure_lora_loaded
-        if not is_exposure_lora_loaded and t < SWITCH_LORA_TIMESTEP:
+        # t will start from 999 and decrease to 0, we only activate once at t=800
+        if not is_exposure_lora_loaded and t <= SWITCH_LORA_TIMESTEP:
             apply_lora(pipe, "DiffusionLight/DiffusionLight") # Exposure lora
             is_exposure_lora_loaded = True
         return callback_kwargs
