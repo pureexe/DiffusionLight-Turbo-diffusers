@@ -73,9 +73,9 @@ mask_image[384 - 10:640 + 10, 384 - 10:640+10] = inpaint_mask * 255
 mask_image = Image.fromarray(mask_image)
 
 # function to apply LoRA weights
-def apply_lora(pipe, lora_path):
+def apply_lora(pipe, lora_path, lora_scale):
     # unload previous lora weights (if any)
-    pipe.unfuse_lora()
+    pipe.unfuse_lora(lora_scale=lora_scale)
     pipe.unload_lora_weights()
     # load new lora weights
     pipe.load_lora_weights(lora_path)
@@ -95,11 +95,11 @@ for ev in ALL_EVS:
         global is_exposure_lora_loaded
         # t will start from 999 and decrease to 0, we only activate once at t=800
         if not is_exposure_lora_loaded and t <= SWITCH_LORA_TIMESTEP:
-            apply_lora(pipe, "DiffusionLight/DiffusionLight") # Exposure lora
+            apply_lora(pipe, "DiffusionLight/DiffusionLight", 0.75) # Exposure lora
             is_exposure_lora_loaded = True
         return callback_kwargs
         
-    apply_lora(pipe, "DiffusionLight/Flickr2K") #Turbo Lora
+    apply_lora(pipe, "DiffusionLight/Flickr2K", 1.0) #Turbo Lora
     
     # DiffusionLight is sensitive to seed, seed should be same across EVs
     generator = torch.Generator(device="cuda").manual_seed(SEED)
