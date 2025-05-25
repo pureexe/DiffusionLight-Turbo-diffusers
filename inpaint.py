@@ -23,7 +23,12 @@ pipe = StableDiffusionXLControlNetInpaintPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0",
     controlnet=controlnet,
     torch_dtype=torch.float16,
+    add_watermarker=False
 ).to("cuda")
+
+
+pipe.load_lora_weights("DiffusionLight/Flickr2K", adapter_name="turbo")
+pipe.load_lora_weights("DiffusionLight/DiffusionLight", adapter_name="exposure")
 
 # we prefer UNI PC for better quality with about 30 step
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
@@ -43,7 +48,7 @@ def new_prepare_mask_latent(self, *args, **kwargs):
 pipe.prepare_mask_latents = new_prepare_mask_latent.__get__(pipe, pipe.__class__)
 
 # load depth model
-depth_estimator = pipeline(task="depth-estimation", model="Intel/dpt-large")
+depth_estimator = pipeline(task="depth-estimation", model="Intel/dpt-large", device="cuda", torch_dtype=torch.float16)
 
 # prepare the input (image and depth)
 init_image = load_image(IMAGE_URL)
@@ -57,6 +62,12 @@ def get_circle_mask(size=256):
     z = (1 - x**2 - y**2)
     mask = z >= 0
     return mask 
+
+# function to apply LoRA weights
+def apply_lora(pipe, adapter_name, lora_scale):
+    pipe.unfuse_lora()     # unload previous lora weights (if any)
+    pipe.set_adapters(adapter_name)
+    pipe.fuse_lora(lora_scale=lora_scale)
 
 # for image size 1024x1024 we add ball size 256x256 in the middle
 depth_mask = get_circle_mask(256).numpy()
@@ -72,19 +83,12 @@ inpaint_mask = get_circle_mask(256 + 20).numpy()
 mask_image[384 - 10:640 + 10, 384 - 10:640+10] = inpaint_mask * 255
 mask_image = Image.fromarray(mask_image)
 
-# function to apply LoRA weights
-def apply_lora(pipe, lora_path, lora_scale):
-    # unload previous lora weights (if any)
-    pipe.unfuse_lora(lora_scale=lora_scale)
-    pipe.unload_lora_weights()
-    # load new lora weights
-    pipe.load_lora_weights(lora_path)
-    pipe.fuse_lora(lora_scale=0.75)
+prompt_embeds, _, pooled_prompt_embeds, _ = pipe.encode_prompt(PROMPT)
+prompt_embeds_black, _, pooled_prompt_embeds_black, _ = pipe.encode_prompt(PROMPT_BLACK)
 
 for ev in ALL_EVS:
     # interpolate between the two prompts
-    prompt_embeds, _, pooled_prompt_embeds, _ = pipe.encode_prompt(PROMPT)
-    prompt_embeds_black, _, pooled_prompt_embeds_black, _ = pipe.encode_prompt(PROMPT_BLACK)
+    
     ratio = (ev - LOWEST_EV) / (0 - LOWEST_EV) #  0 = prompt, 1 = prompt_black
     prompt_embeds = prompt_embeds * ratio + prompt_embeds_black * (1 - ratio)
     pooled_prompt_embeds = pooled_prompt_embeds * ratio + pooled_prompt_embeds_black * (1 - ratio)
@@ -95,11 +99,11 @@ for ev in ALL_EVS:
         global is_exposure_lora_loaded
         # t will start from 999 and decrease to 0, we only activate once at t=800
         if not is_exposure_lora_loaded and t <= SWITCH_LORA_TIMESTEP:
-            apply_lora(pipe, "DiffusionLight/DiffusionLight", 0.75) # Exposure lora
+            apply_lora(pipeline, "exposure", lora_scale=0.75)
             is_exposure_lora_loaded = True
         return callback_kwargs
         
-    apply_lora(pipe, "DiffusionLight/Flickr2K", 1.0) #Turbo Lora
+    apply_lora(pipe, "turbo", lora_scale=1.0)
     
     # DiffusionLight is sensitive to seed, seed should be same across EVs
     generator = torch.Generator(device="cuda").manual_seed(SEED)
